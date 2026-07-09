@@ -16,8 +16,18 @@ if not BOT_TOKEN:
 
 CHAT_ID = None
 
-# Часовой пояс Новосибирск (GMT+7)
-TZ = pytz.timezone('Asia/Novosibirsk')
+# Часовой пояс – можно задать через переменную окружения TIMEZONE
+# По умолчанию – Новосибирск (GMT+7)
+TIMEZONE_STR = os.environ.get("TIMEZONE", "Asia/Novosibirsk")
+try:
+    TZ = pytz.timezone(TIMEZONE_STR)
+except Exception as e:
+    logging.error(f"Неверный часовой пояс: {TIMEZONE_STR}, использую UTC")
+    TZ = pytz.UTC
+
+# Функция для получения текущего времени в нужном поясе
+def get_now():
+    return datetime.now().astimezone(TZ)
 
 # Расписание предметов по будням (0=пн, 4=пт)
 SUBJECTS = {
@@ -133,7 +143,7 @@ async def cmd_schedule(message: types.Message):
 
 @dp.message(Command("today"))
 async def cmd_today(message: types.Message):
-    today = datetime.now(TZ).weekday()
+    today = get_now().weekday()
     events = SCHEDULE.get(today, [])
     if not events:
         await message.answer("Сегодня отдыхай, дел нет.")
@@ -146,14 +156,13 @@ async def cmd_today(message: types.Message):
 
 @dp.message(Command("now"))
 async def cmd_now(message: types.Message):
-    now = datetime.now(TZ)
+    now = get_now()
     today = now.weekday()
     events = SCHEDULE.get(today, [])
     if not events:
         await message.answer("Сегодня отдыхай, дел нет.")
         return
 
-    # Находим ближайшее событие (текущее или следующее)
     current_time = now.strftime("%H:%M")
     next_event = None
     for time_str, _, desc in events:
@@ -161,10 +170,12 @@ async def cmd_now(message: types.Message):
             next_event = (time_str, desc)
             break
 
+    # Логируем текущее время для отладки
+    logging.info(f"Текущее время по расписанию: {current_time}")
+
     if next_event:
         await message.answer(f"⏰ *Прямо сейчас:* {next_event[0]} – {next_event[1]}")
     else:
-        # Если все события прошли – показываем последнее
         last = events[-1]
         await message.answer(f"⏰ *Все дела на сегодня сделаны!* Последнее событие: {last[0]} – {last[1]}")
 
@@ -192,7 +203,7 @@ def schedule_jobs():
                 id=f"{day}_{time_str}"
             )
     scheduler.start()
-    logging.info("⏰ Планировщик запущен, все уведомления запланированы.")
+    logging.info(f"⏰ Планировщик запущен, временная зона: {TIMEZONE_STR}")
 
 # ========== ВЕБ-СЕРВЕР ==========
 async def handle_root(request):
