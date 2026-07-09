@@ -7,12 +7,15 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+import multiprocessing
 
 # ========== НАСТРОЙКИ ==========
-BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")  # Токен из переменных окружения Render
+BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("TELEGRAM_TOKEN не задан в переменных окружения!")
+
 CHAT_ID = None
 
-# Ваше расписание: 0=пн, 1=вт, ...
 SCHEDULE = {
     0: "Математика",
     1: "САОД",
@@ -28,13 +31,14 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 scheduler = AsyncIOScheduler()
-app = Flask(__name__)  # <-- Это для веб-сервера
+app = Flask(__name__)
 
 # ========== КОМАНДЫ БОТА ==========
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     global CHAT_ID
     CHAT_ID = message.chat.id
+    logging.info(f"✅ Chat ID сохранён: {CHAT_ID}")
     await message.answer(
         "Привет! Я буду напоминать тебе о занятиях.\n"
         "Команды: /schedule – расписание, /today – что сегодня"
@@ -57,6 +61,7 @@ async def cmd_today(message: types.Message):
 # ========== ФУНКЦИИ НАПОМИНАНИЙ ==========
 async def send_reminder():
     if CHAT_ID is None:
+        logging.warning("❌ CHAT_ID не установлен, напоминание не отправлено")
         return
     today = datetime.now().weekday()
     subject = SCHEDULE.get(today, "отдых")
@@ -80,13 +85,21 @@ def schedule_jobs():
     scheduler.add_job(send_reminder, CronTrigger(hour=19, minute=0), id="reminder")
     scheduler.add_job(send_start, CronTrigger(hour=19, minute=30), id="start")
     scheduler.start()
+    logging.info("⏰ Планировщик запущен")
 
-# ========== ЗАПУСК БОТА В ФОНОВОМ ПОТОКЕ ==========
+# ========== ЗАПУСК БОТА ==========
 async def start_bot():
-    schedule_jobs()
+    logging.info("🚀 Бот начинает поллинг (ожидание сообщений)...")
     await dp.start_polling(bot)
 
-# ========== ЗАПУСК ВЕБ-СЕРВЕРА (ДЛЯ RENDER) ==========
+def run_bot_process():
+    """Функция для запуска бота в отдельном процессе"""
+    logging.info("🧵 Процесс бота запущен")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(start_bot())
+
+# ========== МАРШРУТЫ FLASK ==========
 @app.route('/')
 def home():
     return "Bot is running!"
@@ -95,14 +108,16 @@ def home():
 def health():
     return "OK"
 
-# Эта функция запускает и веб-сервер, и бота
-def run_bot_and_web():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.create_task(start_bot())
-    # Запускаем Flask-сервер
+# ========== ГЛАВНЫЙ ЗАПУСК ==========
+if __name__ == "__main__":
+    # 1. Запускаем планировщик
+    schedule_jobs()
+
+    # 2. Запускаем бота в отдельном ПРОЦЕССЕ (не потоке)
+    process = multiprocessing.Process(target=run_bot_process, daemon=True)
+    process.start()
+    logging.info("🐍 Процесс бота создан")
+
+    # 3. Запускаем веб-сервер Flask
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
-
-if __name__ == "__main__":
-    run_bot_and_web()
