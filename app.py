@@ -16,8 +16,8 @@ if not BOT_TOKEN:
 
 CHAT_ID = None
 
-# Часовой пояс Москва (для корректного времени)
-MOSCOW_TZ = pytz.timezone('Asia/Novosibirsk')   # или 'Asia/Krasnoyarsk' – GMT+7
+# Часовой пояс Новосибирск (GMT+7)
+TZ = pytz.timezone('Asia/Novosibirsk')
 
 # Расписание предметов по будням (0=пн, 4=пт)
 SUBJECTS = {
@@ -30,7 +30,7 @@ SUBJECTS = {
 
 # ========== ФОРМИРУЕМ РАСПИСАНИЕ НА КАЖДЫЙ ДЕНЬ ==========
 # Каждый элемент: (время, текст_уведомления, описание_для_today)
-# В тексте можно использовать {subject} – он подставится из SUBJECTS
+# В тексте и описании можно использовать {subject}
 
 # Будни (пн-пт)
 WEEKDAY_EVENTS = [
@@ -42,7 +42,7 @@ WEEKDAY_EVENTS = [
     ("18:00", "Свобода! Валим домой!", "Конец работы"),
     ("19:00", "Дуй в хату! Дорога – не место для размышлений!", "Дорога домой"),
     ("19:30", "Жри и отдыхай, завтра опять пахать!", "Ужин и отдых"),
-    ("19:35", "А теперь – за учёбу, козёл! Садись за {subject}!", "Начало учёбы"),
+    ("19:35", "А теперь – за учёбу, козёл! Садись за {subject}!", "Начало учёбы по {subject}"),
     ("22:30", "Хватит мозги парить, отбой!", "Конец учёбы"),
     ("23:00", "Спать, мусор! Свет выключаю!", "Отбой"),
 ]
@@ -51,11 +51,11 @@ WEEKDAY_EVENTS = [
 WEEKEND_EVENTS = [
     ("08:00", "Просыпайся, выходной не значит спать до обеда!", "Подъём"),
     ("09:00", "Жри, да побыстрее!", "Завтрак"),
-    ("10:00", "Садись за {subject} (1-й час)! Не прохлаждайся!", "Учёба (1-й час)"),
+    ("10:00", "Садись за {subject} (1-й час)! Не прохлаждайся!", "Учёба (1-й час) по {subject}"),
     ("11:00", "Отдыхай, но не расслабляйся! 5 минут на перекур!", "Перерыв"),
-    ("12:00", "Второй час {subject}! Давай, шевелись!", "Учёба (2-й час)"),
+    ("12:00", "Второй час {subject}! Давай, шевелись!", "Учёба (2-й час) по {subject}"),
     ("13:00", "Обед! Жри, кормилец!", "Обед"),
-    ("14:00", "Третий час {subject}! Последний рывок!", "Учёба (3-й час)"),
+    ("14:00", "Третий час {subject}! Последний рывок!", "Учёба (3-й час) по {subject}"),
     ("15:00", "Свободное время. Гуляй, но к вечеру будь готов!", "Отдых"),
     ("17:00", "Приберись в камере! Полы помой!", "Домашние дела"),
     ("19:00", "Ужин! Жри давай!", "Ужин"),
@@ -63,27 +63,27 @@ WEEKEND_EVENTS = [
     ("23:00", "Спать, зэк! Завтра снова на зону!", "Отбой"),
 ]
 
-# Собираем полное расписание для каждого дня
 def build_schedule():
     schedule = {}
-    # Будни (0-4)
     for day in range(5):
         subject = SUBJECTS[day]
         events = []
         for time_str, text, desc in WEEKDAY_EVENTS:
-            # Подставляем предмет в текст и описание
-            text_filled = text.replace("{subject}", subject)
-            desc_filled = desc.replace("{subject}", subject)
-            events.append((time_str, text_filled, desc_filled))
+            events.append((
+                time_str,
+                text.replace("{subject}", subject),
+                desc.replace("{subject}", subject)
+            ))
         schedule[day] = events
-    # Выходные (5-6)
     for day in range(5, 7):
-        subject = "Программирование" if day == 5 else "Математика"  # можно изменить
+        subject = "Программирование" if day == 5 else "Математика"
         events = []
         for time_str, text, desc in WEEKEND_EVENTS:
-            text_filled = text.replace("{subject}", subject)
-            desc_filled = desc.replace("{subject}", subject)
-            events.append((time_str, text_filled, desc_filled))
+            events.append((
+                time_str,
+                text.replace("{subject}", subject),
+                desc.replace("{subject}", subject)
+            ))
         schedule[day] = events
     return schedule
 
@@ -93,18 +93,19 @@ SCHEDULE = build_schedule()
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-scheduler = AsyncIOScheduler(timezone=MOSCOW_TZ)  # задаём московское время
+scheduler = AsyncIOScheduler(timezone=TZ)
 
 # ========== КОМАНДЫ ==========
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     global CHAT_ID
     CHAT_ID = message.chat.id
-    logging.info(f"✅ Chat ID сохранён: {CHAT_ID}")
+    logging.info(f"✅ CHAT_ID сохранён: {CHAT_ID}")
     await message.answer(
         "👋 Привет, зэк! Я твой надзиратель. Буду гонять тебя по расписанию.\n\n"
         "📌 Команды:\n"
         "/today – список дел на сегодня\n"
+        "/now – что делать прямо сейчас\n"
         "/schedule – расписание на неделю\n"
         "/help – помощь"
     )
@@ -113,7 +114,7 @@ async def cmd_start(message: types.Message):
 async def cmd_help(message: types.Message):
     await message.answer(
         "📋 Расписание на каждый день:\n"
-        "• Будни: подъём 6:30, работа 8-18, учёба 19:30-22:30, отбой 23:00.\n"
+        "• Будни: подъём 6:30, работа 8-18, учёба 19:35-22:30, отбой 23:00.\n"
         "• Выходные: учёба тремя блоками (10:00, 12:00, 14:00).\n\n"
         "Я буду слать уведомления на каждое действие. Не проспи!"
     )
@@ -121,19 +122,18 @@ async def cmd_help(message: types.Message):
 @dp.message(Command("schedule"))
 async def cmd_schedule(message: types.Message):
     days = ["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС"]
-    text = "📅 Расписание на неделю (события сгруппированы):\n\n"
+    text = "📅 Расписание на неделю (первые 5 событий):\n\n"
     for day_idx, day_name in enumerate(days):
         events = SCHEDULE.get(day_idx, [])
         if not events:
             continue
-        # Берём только описания с временем
-        lines = [f"{time} – {desc}" for time, _, desc in events[:5]]  # покажем первые 5 для краткости
+        lines = [f"{time} – {desc}" for time, _, desc in events[:5]]
         text += f"*{day_name}*:\n" + "\n".join(lines) + "\n… (полный список по /today)\n\n"
     await message.answer(text)
 
 @dp.message(Command("today"))
 async def cmd_today(message: types.Message):
-    today = datetime.now(MOSCOW_TZ).weekday()
+    today = datetime.now(TZ).weekday()
     events = SCHEDULE.get(today, [])
     if not events:
         await message.answer("Сегодня отдыхай, дел нет.")
@@ -144,31 +144,57 @@ async def cmd_today(message: types.Message):
         text += f"⏰ {time_str} – {desc}\n"
     await message.answer(text)
 
+@dp.message(Command("now"))
+async def cmd_now(message: types.Message):
+    now = datetime.now(TZ)
+    today = now.weekday()
+    events = SCHEDULE.get(today, [])
+    if not events:
+        await message.answer("Сегодня отдыхай, дел нет.")
+        return
+
+    # Находим ближайшее событие (текущее или следующее)
+    current_time = now.strftime("%H:%M")
+    next_event = None
+    for time_str, _, desc in events:
+        if time_str >= current_time:
+            next_event = (time_str, desc)
+            break
+
+    if next_event:
+        await message.answer(f"⏰ *Прямо сейчас:* {next_event[0]} – {next_event[1]}")
+    else:
+        # Если все события прошли – показываем последнее
+        last = events[-1]
+        await message.answer(f"⏰ *Все дела на сегодня сделаны!* Последнее событие: {last[0]} – {last[1]}")
+
 # ========== ФУНКЦИЯ ОТПРАВКИ УВЕДОМЛЕНИЙ ==========
 async def send_scheduled_message(text: str):
     if CHAT_ID is None:
         logging.warning("❌ CHAT_ID не установлен, уведомление не отправлено")
         return
-    await bot.send_message(chat_id=CHAT_ID, text=text)
+    try:
+        await bot.send_message(chat_id=CHAT_ID, text=text)
+        logging.info(f"✅ Уведомление отправлено: {text[:50]}...")
+    except Exception as e:
+        logging.error(f"Ошибка отправки: {e}")
 
 # ========== ПЛАНИРОВЩИК ==========
 def schedule_jobs():
     scheduler.remove_all_jobs()
-    # Проходим по каждому дню и каждому событию
     for day, events in SCHEDULE.items():
         for time_str, text, _ in events:
             hour, minute = map(int, time_str.split(':'))
-            # Добавляем задание на каждый день недели
             scheduler.add_job(
                 send_scheduled_message,
-                CronTrigger(day_of_week=day, hour=hour, minute=minute, timezone=MOSCOW_TZ),
+                CronTrigger(day_of_week=day, hour=hour, minute=minute, timezone=TZ),
                 args=[text],
                 id=f"{day}_{time_str}"
             )
     scheduler.start()
     logging.info("⏰ Планировщик запущен, все уведомления запланированы.")
 
-# ========== ВЕБ-СЕРВЕР (AioHTTP) ==========
+# ========== ВЕБ-СЕРВЕР ==========
 async def handle_root(request):
     return web.Response(text="Bot is running!")
 
@@ -177,14 +203,10 @@ async def handle_health(request):
 
 # ========== ГЛАВНЫЙ ЗАПУСК ==========
 async def main():
-    # Запускаем планировщик
     schedule_jobs()
-
-    # Запускаем бота (поллинг)
     bot_task = asyncio.create_task(dp.start_polling(bot))
     logging.info("🚀 Бот начал поллинг...")
 
-    # Запускаем веб-сервер
     app = web.Application()
     app.router.add_get('/', handle_root)
     app.router.add_get('/health', handle_health)
@@ -194,7 +216,6 @@ async def main():
     await site.start()
     logging.info(f"🌐 Веб-сервер запущен на порту {os.environ.get('PORT', 5000)}")
 
-    # Бесконечное ожидание
     await bot_task
 
 if __name__ == "__main__":
