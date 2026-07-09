@@ -2,12 +2,11 @@ import os
 import asyncio
 import logging
 from datetime import datetime
-from flask import Flask
+from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-import multiprocessing
 
 # ========== НАСТРОЙКИ ==========
 BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -31,7 +30,6 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 scheduler = AsyncIOScheduler()
-app = Flask(__name__)
 
 # ========== КОМАНДЫ БОТА ==========
 @dp.message(Command("start"))
@@ -79,7 +77,6 @@ async def send_start():
         subject = SCHEDULE.get(today)
         await bot.send_message(chat_id=CHAT_ID, text=f"🚀 Начинаем занятие по **{subject}**! Удачи!")
 
-# ========== ПЛАНИРОВЩИК ==========
 def schedule_jobs():
     scheduler.remove_all_jobs()
     scheduler.add_job(send_reminder, CronTrigger(hour=19, minute=0), id="reminder")
@@ -87,37 +84,34 @@ def schedule_jobs():
     scheduler.start()
     logging.info("⏰ Планировщик запущен")
 
-# ========== ЗАПУСК БОТА ==========
-async def start_bot():
-    logging.info("🚀 Бот начинает поллинг (ожидание сообщений)...")
-    await dp.start_polling(bot)
+# ========== ОБРАБОТЧИКИ ДЛЯ AioHTTP ==========
+async def handle_root(request):
+    return web.Response(text="Bot is running!")
 
-def run_bot_process():
-    """Функция для запуска бота в отдельном процессе"""
-    logging.info("🧵 Процесс бота запущен")
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(start_bot())
+async def handle_health(request):
+    return web.Response(text="OK")
 
-# ========== МАРШРУТЫ FLASK ==========
-@app.route('/')
-def home():
-    return "Bot is running!"
-
-@app.route('/health')
-def health():
-    return "OK"
-
-# ========== ГЛАВНЫЙ ЗАПУСК ==========
-if __name__ == "__main__":
-    # 1. Запускаем планировщик
+# ========== ЗАПУСК ВСЕГО В ОДНОМ ЦИКЛЕ ==========
+async def main():
+    # 1. Запускаем планировщик (теперь внутри цикла)
     schedule_jobs()
 
-    # 2. Запускаем бота в отдельном ПРОЦЕССЕ (не потоке)
-    process = multiprocessing.Process(target=run_bot_process, daemon=True)
-    process.start()
-    logging.info("🐍 Процесс бота создан")
+    # 2. Запускаем бота (поллинг)
+    bot_task = asyncio.create_task(dp.start_polling(bot))
+    logging.info("🚀 Бот начинает поллинг...")
 
-    # 3. Запускаем веб-сервер Flask
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    # 3. Запускаем aiohttp веб-сервер
+    app = web.Application()
+    app.router.add_get('/', handle_root)
+    app.router.add_get('/health', handle_health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
+    await site.start()
+    logging.info(f"🌐 Веб-сервер запущен на порту {os.environ.get('PORT', 5000)}")
+
+    # 4. Ждём, пока бот работает (бесконечно)
+    await bot_task
+
+if __name__ == "__main__":
+    asyncio.run(main())
