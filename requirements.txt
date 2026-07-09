@@ -1,3 +1,4 @@
 aiogram
 apscheduler
-flask
+aiohttp
+pytz
