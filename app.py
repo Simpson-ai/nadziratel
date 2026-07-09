@@ -164,22 +164,23 @@ async def cmd_now(message: types.Message):
         return
 
     current_time = now.strftime("%H:%M")
-    next_event = None
+    logging.info(f"Текущее время: {current_time}")
+
+    # Ищем последнее событие, которое уже началось (время <= текущего)
+    current_event = None
     for time_str, _, desc in events:
-        if time_str >= current_time:
-            next_event = (time_str, desc)
+        if time_str <= current_time:
+            current_event = (time_str, desc)
+        else:
+            # как только встретили будущее событие, выходим
             break
 
-    # Логируем текущее время для отладки
-    logging.info(f"Текущее время по расписанию: {current_time}")
-
-    if next_event:
-        await message.answer(f"⏰ *Прямо сейчас:* {next_event[0]} – {next_event[1]}")
+    if current_event:
+        await message.answer(f"⏰ *Сейчас идёт:* {current_event[0]} – {current_event[1]}")
     else:
-        last = events[-1]
-        await message.answer(f"⏰ *Все дела на сегодня сделаны!* Последнее событие: {last[0]} – {last[1]}")
-
-# ========== ФУНКЦИЯ ОТПРАВКИ УВЕДОМЛЕНИЙ ==========
+        # Если ни одно событие не началось – показываем первое
+        first = events[0]
+        await message.answer(f"⏰ *Следующее событие:* {first[0]} – {first[1]}")# ========== ФУНКЦИЯ ОТПРАВКИ УВЕДОМЛЕНИЙ ==========
 async def send_scheduled_message(text: str):
     if CHAT_ID is None:
         logging.warning("❌ CHAT_ID не установлен, уведомление не отправлено")
